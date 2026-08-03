@@ -1,0 +1,260 @@
+@import "tailwindcss";
+@reference "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-manrope);
+  --font-mono: var(--font-geist-mono);
+
+  --animate-float: float 6s ease-in-out infinite;
+  --animate-shimmer: shimmer 2s linear infinite;
+
+  @keyframes float {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-10px);
+    }
+  }
+
+  @keyframes shimmer {
+    0% {
+      background-position: -200% 0;
+    }
+    100% {
+      background-position: 200% 0;
+    }
+  }
+}
+
+/* ============================================================================
+   Auralis Design Tokens
+   ============================================================================ */
+:root {
+  /* Surfaces */
+  --au-bg: 222 47% 11%;      /* Deep Slate */
+  --au-surface: 222 47% 14%; /* Slightly lighter Slate */
+  --au-border: rgba(255, 255, 255, 0.08); /* Ultra thin borders */
+
+  /* Text */
+  --au-text-primary: 0 0% 98%;
+  --au-text-secondary: 215 20% 65%;
+
+  /* Accent */
+  --au-accent: 239 84% 67%;       /* Indigo */
+  --au-accent-cyan: 217 91% 60%;  /* Electric Blue */
+  --au-success: 160 84% 39%;      /* Emerald */
+
+  /* Derived colors for Tailwind usage */
+  --color-bg-primary: hsl(var(--au-bg));
+  --color-surface: hsl(var(--au-surface));
+  --color-border: var(--au-border);
+  --color-text-primary: hsl(var(--au-text-primary));
+  --color-text-secondary: hsl(var(--au-text-secondary));
+  --color-accent: hsl(var(--au-accent));
+  --color-accent-cyan: hsl(var(--au-accent-cyan));
+  --color-success: hsl(var(--au-success));
+
+  /* Layout */
+  --radius-card: 16px;
+  --radius-control: 8px;
+  --sidebar-width: 240px;
+  --header-height: 56px;
+  --mobile-nav-height: 64px;
+}
+
+/* ============================================================================
+   Base Styles
+   ============================================================================ */
+@layer base {
+  html, body {
+    background-color: hsl(var(--au-bg));
+    color: hsl(var(--au-text-primary));
+    font-family: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    height: 100%;
+    width: 100%;
+    font-feature-settings: "ss01", "ss02", "cv01", "cv02", "tnum";
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  @media (max-width: 767px) {
+    html, body {
+      @apply overflow-x-hidden;
+      height: auto;
+      min-height: -webkit-fill-available;
+    }
+  }
+
+  /* Minimal scrollbar */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--au-text-secondary) / 0.2) transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--au-text-secondary) / 0.2);
+    border-radius: 4px;
+  }
+}
+
+/* ============================================================================
+   Component Classes
+   ============================================================================ */
+@layer components {
+
+  /* --- Buttons --- */
+  .btn-ghost {
+    @apply flex items-center justify-center font-medium rounded-[var(--radius-control)] transition-all duration-200 active:scale-95;
+  }
+  .btn-primary {
+    @apply bg-[hsl(var(--au-accent))] text-white hover:brightness-110 shadow-sm border border-transparent;
+  }
+  .btn-secondary {
+    @apply bg-transparent text-[hsl(var(--au-text-primary))] border border-[var(--color-border)] hover:bg-[hsl(var(--au-text-primary)_/_0.05)];
+  }
+
+  /* --- Cards --- */
+  .surface-card {
+    background-color: hsl(var(--au-surface));
+    border: 1px solid var(--au-border);
+    border-radius: var(--radius-card);
+    box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.15);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  .surface-card:hover {
+    box-shadow: 0 8px 30px -4px rgba(0, 0, 0, 0.3);
+  }
+
+  /* --- TTS Engine Badges --- */
+  .badge-qwen3 {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.25rem 0.625rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    border-radius: var(--radius-control);
+    background: hsl(var(--au-accent) / 0.12);
+    color: hsl(var(--au-accent));
+  }
+
+  .badge-kokoro {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.25rem 0.625rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    border-radius: var(--radius-control);
+    background: hsl(var(--au-accent-cyan) / 0.12);
+    color: hsl(var(--au-accent-cyan));
+  }
+
+  .badge-indicf5 {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.25rem 0.625rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    border-radius: var(--radius-control);
+    background: hsl(var(--au-success) / 0.12);
+    color: hsl(var(--au-success));
+  }
+
+  /* --- Utility --- */
+  .mobile-safe-bottom {
+    padding-bottom: calc(env(safe-area-inset-bottom) + var(--mobile-nav-height) + 1rem);
+  }
+
+  .mono {
+    font-family: var(--font-geist-mono), ui-monospace, monospace;
+  }
+}
+
+/* ============================================================================
+   Animations (kept for page.tsx compatibility)
+   ============================================================================ */
+.wave-bar {
+  width: 1px;
+  height: 20%;
+  background: hsl(var(--au-text-primary));
+  opacity: 0.3;
+  animation: wave 1.5s ease-in-out infinite;
+}
+
+@keyframes wave {
+  0%, 100% { height: 20%; opacity: 0.1; }
+  50% { height: 100%; opacity: 0.4; }
+}
+
+@keyframes wave-sm {
+  0%, 100% { height: 30%; }
+  50% { height: 100%; }
+}
+
+.animate-wave-sm {
+  animation: wave-sm 0.6s ease-in-out infinite;
+}
+
+/* Legacy compatibility aliases used by page.tsx */
+.glass-card {
+  background-color: hsl(var(--au-surface) / 0.5);
+  border: 1px solid var(--au-border);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-radius: var(--radius-card);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.aurora-container {
+  @apply absolute inset-0 overflow-hidden -z-10 pointer-events-none;
+  filter: blur(120px);
+  opacity: 0.25;
+}
+
+.aurora-blob {
+  @apply absolute w-[600px] h-[600px] rounded-full;
+  background: conic-gradient(from 0deg, hsl(var(--au-accent) / 0.3), transparent, hsl(var(--au-accent-cyan) / 0.2));
+  animation: aurora 40s linear infinite;
+  mix-blend-mode: screen;
+}
+
+@keyframes aurora {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.grainy-overlay {
+  position: fixed;
+  inset: -100%;
+  z-index: 50;
+  pointer-events: none;
+  background-image: url("https://grainy-gradients.vercel.app/noise.svg");
+  opacity: 0.02;
+}
+
+/* Legacy variable aliases (used by page.tsx / Sidebar references) */
+:root {
+  --color-bg-secondary: hsl(var(--au-surface));
+  --color-bg-tertiary: hsl(220 16% 13%);
+  --color-text-tertiary: hsl(220 8% 35%);
+  --color-accent-soft: hsl(var(--au-accent) / 0.06);
+  --glass-bg: hsl(var(--au-surface) / 0.4);
+  --glass-border: var(--au-border);
+  --radius-pro: var(--radius-card);
+}
