@@ -15,7 +15,7 @@ from qwen_tts import Qwen3TTSModel
 # Configuration
 # ============================================================================
 
-MODEL_NAME = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
+MODEL_NAME = "Qwen/Qwen3-TTS-12Hz-0.6B-Base"
 DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
 DTYPE = torch.float16 if torch.cuda.is_available() else torch.float32
 

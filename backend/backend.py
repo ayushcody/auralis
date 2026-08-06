@@ -26,6 +26,7 @@ import tempfile
 import datetime
 import psutil
 import base64
+import traceback
 from datetime import datetime
 from typing import AsyncGenerator, Optional, List, Tuple, Dict, Any, Union
 
@@ -274,6 +275,10 @@ class AdvancedModelManager:
                 device_map=DEVICE,
                 dtype=DTYPE
             )
+            if hasattr(model, 'model') and hasattr(model.model, 'eval'):
+                model.model.eval()
+            elif hasattr(model, 'eval'):
+                model.eval()
             return model
 
         elif model_key == "indic_f5":
@@ -286,6 +291,8 @@ class AdvancedModelManager:
             # Move to GPU if available
             if DEVICE != "cpu":
                 model = model.to(DEVICE)
+            if hasattr(model, 'eval'):
+                model.eval()
             return model
 
         else:
@@ -1180,6 +1187,7 @@ async def clone_voice_v2(
                 model = await advanced_manager.load_model("qwen3_0_6b")
                 voice_prompt_items = await _create_voice_profile(model, file_content, None)
                 pt_path = os.path.join(LOCAL_AUDIO_DIR, f"{voice_id}.pt")
+                print(f"[Storage] Saving local voice embedding to exact path: {pt_path}")
                 torch.save(voice_prompt_items, pt_path)
                 
             local_voice = {
@@ -1213,6 +1221,7 @@ async def clone_voice_v2(
             pt_buffer = io.BytesIO()
             torch.save(voice_prompt_items, pt_buffer)
             pt_path = f"{user_id}/{voice_id}.pt"
+            print(f"[Storage] Saving cloud voice embedding to exact path: {pt_path} in audio-assets")
             supabase.storage.from_("audio-assets").upload(
                 pt_path,
                 pt_buffer.getvalue(),
@@ -1297,6 +1306,7 @@ async def generate_voice_v2(
                         voice_engine = voice_data["engine"]
                         if engine_key == "qwen3_0_6b":
                             pt_path = os.path.join(LOCAL_AUDIO_DIR, f"{voice_id}.pt")
+                            print(f"[Storage] Fetching local voice embedding from exact path: {pt_path}")
                             with open(pt_path, "rb") as f:
                                 pt_data = f.read()
                             with warnings.catch_warnings():
@@ -1305,9 +1315,9 @@ async def generate_voice_v2(
                         elif engine_key == "indic_f5":
                             ref_audio_path = os.path.join(LOCAL_AUDIO_DIR, f"{voice_id}.wav")
                     except Exception as e:
-                        print(f"Local DB Fetch failed, falling back to mock tensor: {e}")
-                        voice_prompt = {"ref_spk_embedding": [torch.randn(1, 1024) if hasattr(torch, 'randn') else None], "x_vector_only_mode": False}
-                        ref_audio_path = "dummy.wav"
+                        print(f"Local DB Fetch failed: {e}")
+                        traceback.print_exc()
+                        raise HTTPException(status_code=404, detail=f"Failed to fetch local voice embedding. File may be missing. Error: {str(e)}")
                 else:
                     try:
                         res = supabase.table("voices").select("reference_audio_path, engine").eq("id", voice_id).execute()
@@ -1324,6 +1334,7 @@ async def generate_voice_v2(
                             # Download embedding
                             uid = storage_path.split('/')[0]
                             pt_path = f"{uid}/{voice_id}.pt"
+                            print(f"[Storage] Fetching cloud voice embedding from exact path: {pt_path} in audio-assets")
                             pt_data = supabase.storage.from_("audio-assets").download(pt_path)
                             with warnings.catch_warnings():
                                 warnings.simplefilter("ignore")
@@ -1336,9 +1347,9 @@ async def generate_voice_v2(
                                 tmp.write(audio_bytes)
                                 ref_audio_path = tmp.name
                     except Exception as e:
-                        print(f"DB Fetch failed, falling back to mock tensor: {e}")
-                        voice_prompt = {"ref_spk_embedding": [torch.randn(1, 1024) if hasattr(torch, 'randn') else None], "x_vector_only_mode": False}
-                        ref_audio_path = "dummy.wav"
+                        print(f"DB Fetch failed: {e}")
+                        traceback.print_exc()
+                        raise HTTPException(status_code=404, detail=f"Failed to fetch cloud voice embedding. File may be missing. Error: {str(e)}")
                     
         # Generate Audio
         loop = asyncio.get_event_loop()
