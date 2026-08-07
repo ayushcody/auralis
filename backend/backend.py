@@ -7,6 +7,9 @@ Run with: uvicorn backend:app --host 0.0.0.0 --port 8000 --reload
 
 import os
 import warnings
+import urllib.parse
+from groq import Groq
+from dotenv import load_dotenv
 
 # --- GPU MEMORY FIX FOR COLAB ---
 # Must be set BEFORE importing torch
@@ -86,6 +89,12 @@ ENGINE_REGISTRY = {
         "type": "clone",
         "languages": {"en", "zh", "ja", "ko"},
     },
+    "audio8_0_6b": {
+        "name": "Audio8-TTS-Preview-0.6b",
+        "hf_id": "AutoArk-AI/Audio8-TTS-Preview-0.6b",
+        "type": "clone",
+        "languages": {"en", "zh", "ja", "ko", "fr", "de", "es", "it", "nl", "pl", "yue"},
+    },
     "indic_f5": {
         "name": "IndicF5 (AI4Bharat)",
         "hf_id": "ai4bharat/IndicF5",
@@ -96,9 +105,13 @@ ENGINE_REGISTRY = {
 
 INDIC_LANGUAGES = {"hi", "mr", "bn", "gu", "kn", "ml", "or", "pa", "ta", "te", "as"}
 
-# Supabase Configuration
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
+# Load environment variables
+env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../frontend/.env.local"))
+load_dotenv(env_path)
+
+# Initialize Supabase
+SUPABASE_URL = os.getenv("NEXT_PUBLIC_SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET", "")
 
 if SUPABASE_URL and SUPABASE_KEY:
@@ -160,7 +173,7 @@ def route_engine(language: str, mode: str, clone_required: bool) -> str:
     Determine which TTS engine to use based on language, mode, and clone requirement.
     - Indic languages always route to IndicF5 (only engine supporting them)
     - Fast mode without clone → Kokoro (82M, ultra-lightweight)
-    - Everything else → Qwen3-TTS-0.6B (quality voice cloning)
+    - Everything else → Audio8-TTS-Preview-0.6b (quality voice cloning)
     """
     if language in INDIC_LANGUAGES:
         import os
@@ -170,7 +183,7 @@ def route_engine(language: str, mode: str, clone_required: bool) -> str:
         return "indic_f5"
     if mode == "fast" and not clone_required:
         return "kokoro"
-    return "qwen3_0_6b"
+    return "audio8_0_6b"
 
 # ============================================================================
 # Advanced Model Manager (LRU Eviction + Idle Timeout)
@@ -281,6 +294,16 @@ class AdvancedModelManager:
                 model.eval()
             return model
 
+        elif model_key == "audio8_0_6b":
+            from audio8_tts import Audio8TTSModel
+            print(f"[AdvancedModelManager] Instantiating Audio8-TTS-Preview-0.6b on {DEVICE}...")
+            model = Audio8TTSModel.from_pretrained(
+                "AutoArk-AI/Audio8-TTS-Preview-0.6b",
+                device_map=DEVICE,
+                dtype=DTYPE
+            )
+            return model
+
         elif model_key == "indic_f5":
             from transformers import AutoModel
             print(f"[AdvancedModelManager] Instantiating IndicF5 (ai4bharat/IndicF5) on {DEVICE}...")
@@ -336,6 +359,11 @@ app.add_middleware(
 async def on_startup():
     await advanced_manager.start_cleanup_loop()
     print("[Auralis] Idle cleanup loop started")
+
+
+@app.get("/api/engines")
+async def get_engines():
+    return [{"id": k, "name": v["name"]} for k, v in ENGINE_REGISTRY.items()]
 
 @app.get("/health")
 async def health_check():
@@ -448,6 +476,11 @@ async def root():
     }
 
 
+
+@app.get("/api/engines")
+async def get_engines():
+    return [{"id": k, "name": v["name"]} for k, v in ENGINE_REGISTRY.items()]
+
 @app.get("/health")
 async def health():
     return {"status": "healthy", "cuda_available": torch.cuda.is_available()}
@@ -549,7 +582,7 @@ async def save_voice(
             
         if transcript:
              print(f"Creating profile for {name} with transcript...")
-             model = await advanced_manager.load_model("qwen3_0_6b")
+             model = await advanced_manager.load_model(engine)
              voice_prompt_items = await _create_voice_profile(
                  model, 
                  file_content, 
@@ -557,7 +590,7 @@ async def save_voice(
              )
         else:
              print(f"Creating x-vector profile for {name}...")
-             model = await advanced_manager.load_model("qwen3_0_6b")
+             model = await advanced_manager.load_model(engine)
              voice_prompt_items = await _create_voice_profile(
                  model, 
                  file_content, 
@@ -586,7 +619,7 @@ async def save_voice(
         supabase.table("voices").insert({
             "id": voice_id,
             "project_id": project_id,
-            "engine": "qwen3-tts",
+            "engine": "audio8-tts",
             "language": "en",
             "reference_audio_path": storage_path,
             "display_name": name
@@ -664,7 +697,7 @@ async def _load_audio_for_prompt(audio_bytes: bytes) -> list:
 
 
 
-async def _resolve_voice_model(voice_id: Optional[str], audio_file: Optional[UploadFile], transcript: str, use_transcript: bool) -> Tuple[Any, str]:
+async def _resolve_voice_model(voice_id: Optional[str], audio_file: Optional[UploadFile], transcript: str, use_transcript: bool, engine: str = "audio8_0_6b") -> Tuple[Any, str]:
     """
     Determines the voice model prompt to use based on inputs (Saved Voice ID vs Uploaded File).
     Returns (voice_prompt, mode_description).
@@ -696,7 +729,7 @@ async def _resolve_voice_model(voice_id: Optional[str], audio_file: Optional[Upl
         audio_bytes = await audio_file.read()
         final_transcript = transcript if (use_transcript and transcript.strip()) else None
         
-        model = await advanced_manager.load_model("qwen3_0_6b")
+        model = await advanced_manager.load_model(engine)
         prompt = await _create_voice_profile(model, audio_bytes, final_transcript)
         mode = "transcript mode" if final_transcript else "x-vector mode"
         return prompt, mode
@@ -704,7 +737,7 @@ async def _resolve_voice_model(voice_id: Optional[str], audio_file: Optional[Upl
     else:
         raise ValueError("No voice provided (ID or File required)")
 
-async def generate_with_progress(prompt, voice_id, audio_file, reference_text, use_transcript, temperature=0.8, top_p=0.8, top_k=50, repetition_penalty=1.1):
+async def generate_with_progress(prompt, voice_id, audio_file, reference_text, use_transcript, engine="audio8_0_6b", temperature=0.8, top_p=0.8, top_k=50, repetition_penalty=1.1):
     """Generator that yields SSE progress events during voice generation."""
     
     def send_event(event_type: str, data: dict) -> str:
@@ -717,7 +750,7 @@ async def generate_with_progress(prompt, voice_id, audio_file, reference_text, u
         yield send_event("progress", {"stage": "analyzing", "percent": 10, "message": "Analyzing voice characteristics..."})
         
         voice_prompt, mode = await _resolve_voice_model(
-            voice_id, audio_file, reference_text, use_transcript
+            voice_id, audio_file, reference_text, use_transcript, engine
         )
         
         yield send_event("progress", {"stage": "extracted", "percent": 30, "message": f"Voice profile ready ({mode})"})
@@ -739,7 +772,7 @@ async def generate_with_progress(prompt, voice_id, audio_file, reference_text, u
             chunk_progress = 40 + int((i / len(text_chunks)) * 50)
             yield send_event("progress", {"stage": "generating", "percent": chunk_progress, "message": f"Generating part {i+1}/{len(text_chunks)}..."})
             
-            model = await advanced_manager.load_model("qwen3_0_6b")
+            model = await advanced_manager.load_model(engine)
             wavs, sr = await loop.run_in_executor(
                 None,
                 lambda: model.generate_voice_clone(
@@ -784,6 +817,7 @@ async def generate_voice_stream(
     reference_text: str = Form(""),
     audio_file: UploadFile = File(None),
     voice_id: str = Form(None),
+    engine: str = Form("audio8_0_6b"),
     temperature: float = Form(0.8),
     top_p: float = Form(0.8),
     top_k: int = Form(50),
@@ -800,7 +834,7 @@ async def generate_voice_stream(
     
     return StreamingResponse(
         generate_with_progress(
-            prompt, voice_id, audio_file, reference_text, use_transcript_bool,
+            prompt, voice_id, audio_file, reference_text, use_transcript_bool, engine,
             temperature, top_p, top_k, repetition_penalty
         ),
         media_type="text/event-stream",
@@ -817,7 +851,8 @@ async def generate_voice(
     use_transcript: str = Form("false"),
     reference_text: str = Form(""),
     audio_file: UploadFile = File(None),
-    voice_id: str = Form(None)
+    voice_id: str = Form(None),
+    engine: str = Form("audio8_0_6b")
 ):
     """
     Generate cloned voice (non-streaming version).
@@ -842,7 +877,7 @@ async def generate_voice(
         
         if should_use_transcript and ref_text_to_use.strip():
             print(f"Generating voice with transcript: '{ref_text_to_use[:50]}...'")
-            model = await advanced_manager.load_model("qwen3_0_6b")
+            model = await advanced_manager.load_model(engine)
             voice_prompt = await _create_voice_profile(
                 model,
                 audio_bytes,
@@ -851,7 +886,7 @@ async def generate_voice(
             mode = "transcript mode"
         else:
             print("Generating voice in x-vector mode")
-            model = await advanced_manager.load_model("qwen3_0_6b")
+            model = await advanced_manager.load_model(engine)
             voice_prompt = await _create_voice_profile(
                  model,
                  audio_bytes,
@@ -861,7 +896,7 @@ async def generate_voice(
         
         print(f"Text to synthesize: '{prompt}'")
         
-        model = await advanced_manager.load_model("qwen3_0_6b")
+        model = await advanced_manager.load_model(engine)
         wavs, output_sr = model.generate_voice_clone(
             text=prompt,
             language="Auto",
@@ -931,7 +966,7 @@ async def generate_design(
         output_sr = 24000 # default
         
         for chunk in text_chunks:
-            model = await advanced_manager.load_model("qwen3_0_6b")
+            model = await advanced_manager.load_model(engine)
             wavs, sr = await loop.run_in_executor(
                 None,
                 lambda: model.generate_voice_design(
@@ -988,7 +1023,7 @@ async def generate_preset(
         output_sr = 24000
         
         for chunk in text_chunks:
-            model = await advanced_manager.load_model("qwen3_0_6b")
+            model = await advanced_manager.load_model(engine)
             wavs, sr = await loop.run_in_executor(
                 None,
                 lambda: model.generate_custom_voice(
@@ -1070,7 +1105,7 @@ async def generate_dialogue(request: DialogueRequest):
         
         if line.type == "preset":
             # Generate Custom Voice
-            model = await advanced_manager.load_model("qwen3_0_6b")
+            model = await advanced_manager.load_model(engine)
             wavs, sr = await loop.run_in_executor(
                 None,
                 lambda: model.generate_custom_voice(
@@ -1115,14 +1150,14 @@ async def generate_dialogue(request: DialogueRequest):
                  ref_audio = await _load_audio_for_prompt(audio_bytes)
                  
                  if voice['transcript']:
-                    model = await advanced_manager.load_model("qwen3_0_6b")
+                    model = await advanced_manager.load_model(engine)
                     voice_prompt = model.create_voice_clone_prompt(ref_audio=ref_audio, ref_text=voice['transcript'])
                  else:
-                    model = await advanced_manager.load_model("qwen3_0_6b")
+                    model = await advanced_manager.load_model(engine)
                     voice_prompt = model.create_voice_clone_prompt(ref_audio=ref_audio, x_vector_only_mode=True)
 
              # Generate
-             model = await advanced_manager.load_model("qwen3_0_6b")
+             model = await advanced_manager.load_model(engine)
              wavs, sr = await loop.run_in_executor(
                 None,
                 lambda: model.generate_voice_clone(
@@ -1182,9 +1217,9 @@ async def clone_voice_v2(
             with open(local_wav_path, "wb") as f:
                 f.write(file_content)
                 
-            if engine_key == "qwen3_0_6b":
+            if engine_key == "audio8_0_6b":
                 print(f"Creating Qwen3 embedding for {display_name} locally...")
-                model = await advanced_manager.load_model("qwen3_0_6b")
+                model = await advanced_manager.load_model(engine)
                 voice_prompt_items = await _create_voice_profile(model, file_content, None)
                 pt_path = os.path.join(LOCAL_AUDIO_DIR, f"{voice_id}.pt")
                 print(f"[Storage] Saving local voice embedding to exact path: {pt_path}")
@@ -1213,9 +1248,9 @@ async def clone_voice_v2(
         engine_key = route_engine(language, "premium", True)
         
         # If Qwen3, pre-compute the embedding
-        if engine_key == "qwen3_0_6b":
+        if engine_key == "audio8_0_6b":
             print(f"Creating Qwen3 embedding for {display_name}...")
-            model = await advanced_manager.load_model("qwen3_0_6b")
+            model = await advanced_manager.load_model(engine)
             voice_prompt_items = await _create_voice_profile(model, file_content, None)
             
             pt_buffer = io.BytesIO()
@@ -1284,72 +1319,61 @@ async def generate_voice_v2(
         voice_prompt = None
         ref_audio_path = None
         if clone_required:
-            if voice_id == "test_id" or voice_id == "demo":
-                print("Mocking clone data for test_id")
-                voice_engine = "qwen3_0_6b"
-                if engine_key == "qwen3_0_6b":
-                    voice_prompt = {
-                        "ref_spk_embedding": [torch.randn(1, 1024) if hasattr(torch, 'randn') else None],
-                        "x_vector_only_mode": False
-                    }
-                elif engine_key == "indic_f5":
-                    ref_audio_path = "dummy.wav"
+            storage_mode = request.headers.get("storage-mode", "cloud")
+            if storage_mode == "local":
+                try:
+                    local_voices = get_local_voices()
+                    voice_data = next((v for v in local_voices if v["id"] == voice_id), None)
+                    if not voice_data:
+                        raise HTTPException(status_code=404, detail="Local Voice ID not found")
+                    
+                    voice_engine = voice_data["engine"]
+                    if engine_key == "audio8_0_6b":
+                        pt_path = os.path.join(LOCAL_AUDIO_DIR, f"{voice_id}.pt")
+                        print(f"[Storage] Fetching local voice embedding from exact path: {pt_path}")
+                        with open(pt_path, "rb") as f:
+                            pt_data = f.read()
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore")
+                            voice_prompt = torch.load(io.BytesIO(pt_data), weights_only=False)
+                    elif engine_key == "indic_f5":
+                        ref_audio_path = os.path.join(LOCAL_AUDIO_DIR, f"{voice_id}.wav")
+                except Exception as e:
+                    print(f"Local DB Fetch failed: {e}")
+                    traceback.print_exc()
+                    raise HTTPException(status_code=404, detail=f"Failed to fetch local voice embedding. File may be missing. Error: {str(e)}")
             else:
-                storage_mode = request.headers.get("storage-mode", "cloud")
-                if storage_mode == "local":
-                    try:
-                        local_voices = get_local_voices()
-                        voice_data = next((v for v in local_voices if v["id"] == voice_id), None)
-                        if not voice_data:
-                            raise HTTPException(status_code=404, detail="Local Voice ID not found")
-                        
-                        voice_engine = voice_data["engine"]
-                        if engine_key == "qwen3_0_6b":
-                            pt_path = os.path.join(LOCAL_AUDIO_DIR, f"{voice_id}.pt")
-                            print(f"[Storage] Fetching local voice embedding from exact path: {pt_path}")
-                            with open(pt_path, "rb") as f:
-                                pt_data = f.read()
-                            with warnings.catch_warnings():
-                                warnings.simplefilter("ignore")
-                                voice_prompt = torch.load(io.BytesIO(pt_data), weights_only=False)
-                        elif engine_key == "indic_f5":
-                            ref_audio_path = os.path.join(LOCAL_AUDIO_DIR, f"{voice_id}.wav")
-                    except Exception as e:
-                        print(f"Local DB Fetch failed: {e}")
-                        traceback.print_exc()
-                        raise HTTPException(status_code=404, detail=f"Failed to fetch local voice embedding. File may be missing. Error: {str(e)}")
-                else:
-                    try:
-                        res = supabase.table("voices").select("reference_audio_path, engine").eq("id", voice_id).execute()
-                        if not res.data:
-                            raise HTTPException(status_code=404, detail="Voice ID not found")
-                        
-                        voice_engine = res.data[0]["engine"]
-                        if voice_engine != engine_key and engine_key == "qwen3_0_6b":
-                             print(f"Warning: Voice was generated for {voice_engine}, but using {engine_key}")
-                         
-                        storage_path = res.data[0]["reference_audio_path"]
-                        
-                        if engine_key == "qwen3_0_6b":
-                            # Download embedding
-                            uid = storage_path.split('/')[0]
-                            pt_path = f"{uid}/{voice_id}.pt"
-                            print(f"[Storage] Fetching cloud voice embedding from exact path: {pt_path} in audio-assets")
-                            pt_data = supabase.storage.from_("audio-assets").download(pt_path)
-                            with warnings.catch_warnings():
-                                warnings.simplefilter("ignore")
-                                voice_prompt = torch.load(io.BytesIO(pt_data), weights_only=False)
-                        elif engine_key == "indic_f5":
-                            # Download raw audio to temp file
-                            audio_bytes = supabase.storage.from_("audio-assets").download(storage_path)
-                            ext = os.path.splitext(storage_path)[1] or ".wav"
-                            with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
-                                tmp.write(audio_bytes)
-                                ref_audio_path = tmp.name
-                    except Exception as e:
-                        print(f"DB Fetch failed: {e}")
-                        traceback.print_exc()
-                        raise HTTPException(status_code=404, detail=f"Failed to fetch cloud voice embedding. File may be missing. Error: {str(e)}")
+                try:
+                    res = supabase.table("voices").select("reference_audio_path, engine").eq("id", voice_id).execute()
+                    if not res.data:
+                        raise HTTPException(status_code=404, detail="Voice ID not found")
+                    
+                    voice_engine = res.data[0]["engine"]
+                    if voice_engine != engine_key and engine_key == "audio8_0_6b":
+                         print(f"Warning: Voice was generated for {voice_engine}, but using {engine_key}")
+                     
+                    storage_path = res.data[0]["reference_audio_path"]
+                    
+                    if engine_key == "audio8_0_6b":
+                        # Download embedding
+                        uid = storage_path.split('/')[0]
+                        pt_path = f"{uid}/{voice_id}.pt"
+                        print(f"[Storage] Fetching cloud voice embedding from exact path: {pt_path} in audio-assets")
+                        pt_data = supabase.storage.from_("audio-assets").download(pt_path)
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore")
+                            voice_prompt = torch.load(io.BytesIO(pt_data), weights_only=False)
+                    elif engine_key == "indic_f5":
+                        # Download raw audio to temp file
+                        audio_bytes = supabase.storage.from_("audio-assets").download(storage_path)
+                        ext = os.path.splitext(storage_path)[1] or ".wav"
+                        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+                            tmp.write(audio_bytes)
+                            ref_audio_path = tmp.name
+                except Exception as e:
+                    print(f"DB Fetch failed: {e}")
+                    traceback.print_exc()
+                    raise HTTPException(status_code=404, detail=f"Failed to fetch cloud voice embedding. File may be missing. Error: {str(e)}")
                     
         # Generate Audio
         loop = asyncio.get_event_loop()
@@ -1366,7 +1390,7 @@ async def generate_voice_v2(
             
             wav = await loop.run_in_executor(None, generate_kokoro)
             
-        elif engine_key == "qwen3_0_6b":
+        elif engine_key == "audio8_0_6b":
             wavs, sr = await loop.run_in_executor(
                 None,
                 lambda: model.generate_voice_clone(
@@ -1481,9 +1505,12 @@ async def create_agent(request: CreateAgentRequest, user_id: str = Depends(get_c
         print("WARNING: GROQ_API_KEY not set. Generating empty agent template.")
         error_flag = True
 
+    if error_flag:
+        raise HTTPException(status_code=500, detail="Failed to generate agent via LLM (Check GROQ_API_KEY or LLM response)")
+
     try:
         supabase.table("agents").insert(final_data).execute()
-        return {"agent": final_data, "error": error_flag}
+        return {"agent": final_data, "error": False}
     except Exception as e:
         print(f"Error saving agent to DB: {e}")
         raise HTTPException(status_code=500, detail="Failed to save agent to database")
@@ -1565,10 +1592,12 @@ async def upload_knowledge(
     
     # 5. Insert to DB
     try:
+        import uuid
+        doc_id = str(uuid.uuid4())
         doc_data = {
+            "id": doc_id,
             "agent_id": agent_id,
-            "filename": file.filename,
-            "storage_path": f"local_memory/{file.filename}"
+            "filename": file.filename
         }
         doc_res = supabase.table("documents").insert(doc_data).execute()
         document_id = doc_res.data[0]["id"]
@@ -1649,7 +1678,7 @@ async def process_turn(
             conv_res = supabase.table("conversations").insert({"agent_id": agent_id}).execute()
             conversation_id = conv_res.data[0]["id"]
             
-        history_res = supabase.table("conversation_turns").select("*").eq("conversation_id", conversation_id).order("created_at", ascending=False).limit(6).execute()
+        history_res = supabase.table("conversation_turns").select("*").eq("conversation_id", conversation_id).order("created_at", desc=True).limit(6).execute()
         history = list(reversed(history_res.data))
         history_text = "\n".join([f"{t['role'].upper()}: {t['text_content']}" for t in history])
         
@@ -1724,7 +1753,7 @@ USER: {user_text}"""
             res = supabase.table("voices").select("reference_audio_path, engine").eq("id", voice_id).execute()
             if res.data:
                 storage_path = res.data[0]["reference_audio_path"]
-                if engine_key == "qwen3_0_6b":
+                if engine_key == "audio8_0_6b":
                     uid = storage_path.split('/')[0]
                     pt_path = f"{uid}/{voice_id}.pt"
                     pt_data = supabase.storage.from_("audio-assets").download(pt_path)
@@ -1749,7 +1778,7 @@ USER: {user_text}"""
                     audio_chunks.append(audio_out)
                 return np.concatenate(audio_chunks) if audio_chunks else np.array([])
             wav = await loop.run_in_executor(None, generate_kokoro)
-        elif engine_key == "qwen3_0_6b":
+        elif engine_key == "audio8_0_6b":
             wavs, sr = await loop.run_in_executor(
                 None,
                 lambda: model.generate_voice_clone(

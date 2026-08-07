@@ -19,6 +19,11 @@ import {
   ChevronDown
 } from "lucide-react";
 
+interface Engine {
+  id: string;
+  name: string;
+}
+
 interface Voice {
   id: string;
   name: string;
@@ -52,9 +57,13 @@ function StudioInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  
   const [mode, setMode] = useState<StudioMode>("clone");
   const [activeSpeakerMenu, setActiveSpeakerMenu] = useState<number | null>(null);
   const [voices, setVoices] = useState<Voice[]>([]);
+  const [engines, setEngines] = useState<Engine[]>([]);
+  const [selectedEngine, setSelectedEngine] = useState<string>("audio8_0_6b");
+
   const [selectedVoice, setSelectedVoice] = useState<string>("");
   const [prompt, setPrompt] = useState("");
   const [generating, setGenerating] = useState(false);
@@ -72,6 +81,19 @@ function StudioInner() {
   ]);
 
   const activeAudioRef = useRef<HTMLAudioElement>(null);
+
+
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/api/engines`)
+      .then((r) => r.json())
+      .then((data) => {
+        setEngines(data);
+        if (data.length > 0 && !data.find((e: Engine) => e.id === "audio8_0_6b")) {
+            setSelectedEngine(data[0].id);
+        }
+      })
+      .catch(console.error);
+  }, []);
 
   useEffect(() => {
     if (!authLoading && !user) router.replace("/");
@@ -158,6 +180,7 @@ function StudioInner() {
       } else {
         const formData = new FormData();
         formData.append("prompt", prompt);
+        formData.append("engine", selectedEngine);
         if (selectedVoice) formData.append("voice_id", selectedVoice);
 
         const response = await fetch(`${API_BASE_URL}/api/generate-stream`, {
@@ -249,6 +272,7 @@ function StudioInner() {
           Authorization: `Bearer ${session.access_token}`
         },
         body: JSON.stringify({
+          engine: selectedEngine,
           lines: dialogueLines.map(l => ({
             speaker: l.type === "cloned" ? l.voiceId : l.speaker,
             text: l.text,
@@ -519,6 +543,18 @@ function StudioInner() {
                   </div>
                 ) : (
                   <div className="h-full flex flex-col space-y-3">
+
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-[9px] font-bold uppercase tracking-[0.1em] opacity-30 text-[var(--color-text-primary)]">Engine</label>
+                      <select 
+                        value={selectedEngine} 
+                        onChange={(e) => setSelectedEngine(e.target.value)}
+                        className="bg-[var(--color-bg-secondary)] border border-[var(--glass-border)] rounded-full px-3 py-1 text-[10px] uppercase tracking-widest focus:outline-none"
+                      >
+                        {engines.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+                      </select>
+                    </div>
+
                     <div className="flex items-center justify-between">
                       <label className="text-[9px] font-bold uppercase tracking-[0.1em] opacity-30 text-[var(--color-text-primary)]">Script</label>
                       <span className="text-[8px] font-medium tracking-widest opacity-20">{prompt.length} / 2000</span>
