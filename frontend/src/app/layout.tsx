@@ -1,12 +1,13 @@
 import type { Metadata, Viewport } from "next";
-import { Manrope, Geist_Mono } from "next/font/google";
+import { Roboto, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/components/AuthProvider";
 import { LayoutWrapper } from "@/components/LayoutWrapper";
 
-const manrope = Manrope({
+const roboto = Roboto({
+  weight: ["400", "500", "700"],
   subsets: ["latin"],
-  variable: "--font-manrope",
+  variable: "--font-roboto",
   display: "swap",
 });
 
@@ -56,7 +57,7 @@ export default function RootLayout({
         <meta name="theme-color" content="#080A0F" />
       </head>
       <body
-        className={`${manrope.variable} ${geistMono.variable} font-sans antialiased`}
+        className={`${roboto.variable} ${geistMono.variable} font-sans antialiased`}
       >
         <AuthProvider>
           <LayoutWrapper>

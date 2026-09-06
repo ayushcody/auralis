@@ -2,7 +2,7 @@
 @reference "tailwindcss";
 
 @theme {
-  --font-sans: var(--font-manrope);
+  --font-sans: var(--font-roboto);
   --font-mono: var(--font-geist-mono);
 
   --animate-float: float 6s ease-in-out infinite;
@@ -71,7 +71,7 @@
   html, body {
     background-color: hsl(var(--au-bg));
     color: hsl(var(--au-text-primary));
-    font-family: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+    font-family: var(--font-roboto), ui-sans-serif, system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     height: 100%;

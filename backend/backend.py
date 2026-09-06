@@ -135,7 +135,7 @@ async def get_current_user(request: Request, authorization: str = Header(None)):
     token = authorization.split(" ")[1]
     
     if token == "demo-token" or token == "test":
-        return {"sub": "demo-user", "role": "demo"}
+        return "demo-user"
         
     try:
         payload = jwt.decode(token, SUPABASE_JWT_SECRET, algorithms=["HS256"], audience="authenticated")
